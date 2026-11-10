@@ -2,7 +2,7 @@
 
 ![Titan CLI by SignalBrain neon sign](assets/titan-cli-banner.png)
 
-`gh ci-receipt` is the installable command for v0.1. It reads GitHub Actions timing data using your GitHub CLI credentials and produces a **CI Receipt**, a Markdown report you can save or paste into a pull request.
+`gh ci-receipt` is the installable command, introduced in v0.1. It reads GitHub Actions timing data using your GitHub CLI credentials and produces a **CI Receipt**, a Markdown report you can save or paste into a pull request.
 
 ## Quick start
 
@@ -34,8 +34,8 @@ You can also run `./gh-ci-receipt` directly. When running from a GitHub checkout
 
 - **Wall** measures workflow start to the last recorded non-skipped job completion. It excludes initial workflow queue time and any activity after the last job.
 - **Runner time** sums recorded job durations. Parallel jobs can therefore lower wall time while raising runner time. Runner time is separate from GitHub billing.
-- **Audit** ranks the median observed duration of each named step within a workflow and job. It reports sample counts and links to the slowest observed example. Use `--workflow` for a narrower sample. Step ranking does not reconstruct the critical path.
-- **Compare** flags differences in workflow, event, branch, conclusion and timed workload scope (the non-skipped job names). A pair can differ in workload, cache state or runner class even when these fields match. Use several comparable pairs before making a savings claim.
+- **Audit** ranks the median observed duration of each named step within a workflow and job. Sample counts are timed step occurrences, not unique runs; repeated same-named steps in one job share a bucket. Timed failed steps are included, while skipped and cancelled steps are excluded. Use `--workflow` for a narrower sample. Step ranking does not reconstruct the critical path.
+- **Compare** flags differences in workflow, event, branch, conclusion, job names, runner labels, and rerun coverage. Those flags do not prove matching matrix configuration, cache state, workflow contents, or changed code. Review those before attributing a timing difference to a change.
 - **Reruns** report the latest attempt's runner time only. GitHub's attempt endpoint may cover just the rerun jobs, so full-run wall time is unavailable.
 - **Coverage** uses Actions run, job and step timestamps. Cache activity inside a composite setup step can only be inspected by following the job log link.
 

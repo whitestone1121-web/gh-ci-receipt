@@ -36,7 +36,17 @@ def api(path, paginate=False):
 
 
 def timestamp(value):
-    return datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str):
+        raise ValueError("GitHub timestamps must be ISO 8601 strings.")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError("Invalid GitHub timestamp; expected ISO 8601 with a timezone.") from error
+    if parsed.utcoffset() is None:
+        raise ValueError("GitHub timestamp is missing a timezone.")
+    return parsed
 
 
 def elapsed(start, end):
@@ -78,6 +88,10 @@ def summarize(run, jobs):
         "runner": sum(item[3] for item in spans) if timed else None,
         "jobs": spans,
         "job_names": sorted(job["name"] for job in jobs if job.get("conclusion") != "skipped"),
+        "runner_labels": sorted(
+            (job["name"], tuple(sorted(job.get("labels") or [])))
+            for job in jobs if job.get("conclusion") != "skipped"
+        ),
     }
 
 
@@ -90,8 +104,12 @@ def duration(seconds):
 
 
 def safe(value):
-    return html.escape(str(value)).replace("|", "&#124;").replace("[", "&#91;").replace(
-        "]", "&#93;").replace("\n", " ").replace("\r", " ")
+    text = html.escape(str(value)).replace("\\", "\\\\")
+    for character, entity in (("|", "&#124;"), ("[", "&#91;"), ("]", "&#93;")):
+        text = text.replace(character, entity)
+    for character in ("*", "_", "`", "~"):
+        text = text.replace(character, "\\" + character)
+    return text.replace("\n", " ").replace("\r", " ")
 
 
 def run_link(repo, run):
@@ -132,8 +150,11 @@ def audit(repo, count, workflow):
         _, url = max(values)
         lines.append(f"| {safe(workflow_name)} | {safe(job_name)} | {safe(step)} | "
                      f"{duration(median)} | {len(values)} | [Job log]({url}) |")
-    lines += ["", "Step rank reflects observed duration. Parallel steps can overlap and the "
-              "ranking does not identify the workflow critical path.", "", METHODS]
+    lines += ["", "Step samples count timed occurrences, not unique runs. Repeated same-named "
+              "steps in one job share a bucket. Timed failed steps are included; skipped and "
+              "cancelled steps are excluded.", "", "Step rank reflects observed duration. "
+              "Parallel steps can overlap and the ranking does not identify the workflow "
+              "critical path.", "", METHODS]
     return "\n".join(lines)
 
 
@@ -157,6 +178,8 @@ def compare(repo, before_id, after_id):
             differences.append(label)
     if first["job_names"] != second["job_names"]:
         differences.append("job set")
+    if first["runner_labels"] != second["runner_labels"]:
+        differences.append("runner labels")
     if before["run_attempt"] != 1 or after["run_attempt"] != 1:
         differences.append("rerun attempt coverage")
     if before.get("conclusion") != "success" or after.get("conclusion") != "success":
@@ -176,8 +199,10 @@ def compare(repo, before_id, after_id):
         lines.append(f"| {label} | {duration(old)} | {duration(new)} | {change} |")
     if differences:
         lines += ["", "**Comparability flags** · " + ", ".join(differences) + "."]
-    lines += ["", "One pair measures an observed difference. Review workload, runner class "
-              "and cache state before attributing it to a change.", "", METHODS]
+    lines += ["", "One pair measures an observed difference. Flags cover workflow metadata, "
+              "job names, and runner labels; they do not prove matching matrix configuration, "
+              "cache state, workflow contents, or changed code. Review those before attributing "
+              "a difference to a change.", "", METHODS]
     return "\n".join(lines)
 
 

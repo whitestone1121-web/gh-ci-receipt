@@ -17,17 +17,44 @@ def run(run_id=1, attempt=1):
                 workflow_id=123, event="pull_request", head_branch="feature")
 
 
-def job(job_id, start, end, conclusion="success"):
+def job(job_id, start, end, conclusion="success", labels=("ubuntu-latest",)):
     began = f"2026-11-09T12:{start}:00Z" if start else None
     ended = f"2026-11-09T12:{end}:00Z" if end else None
     return dict(id=job_id, name=f"Job {job_id}", started_at=began,
-                completed_at=ended, conclusion=conclusion, steps=[
+                completed_at=ended, conclusion=conclusion, labels=list(labels), steps=[
                     dict(name="Install | compile", started_at=began,
                          completed_at=ended, conclusion=conclusion)
                 ])
 
 
 class ReceiptTests(unittest.TestCase):
+    def test_timestamp_rejects_non_iso_and_timezone_naive_values(self):
+        self.assertIsNone(cli["timestamp"](None))
+        self.assertIsNone(cli["timestamp"](""))
+        for value in (123, "2026-11-09T12:00:00", "not a timestamp"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                cli["timestamp"](value)
+
+    def test_malformed_timestamp_returns_cli_error_without_traceback(self):
+        malformed = run()
+        malformed["run_started_at"] = 123
+
+        def api(path, paginate=False):
+            if paginate:
+                jobs = [job(1, "00", "01")]
+                return [{"total_count": len(jobs), "jobs": jobs}]
+            return {"workflow_runs": [malformed]}
+
+        error = io.StringIO()
+        with patch.dict(functions, {"api": api}), patch(
+            "sys.argv", ["gh-ci-receipt", "audit", REPO]
+        ), contextlib.redirect_stderr(error):
+            status = cli["main"]()
+
+        self.assertEqual(status, 1)
+        self.assertIn("ISO 8601 strings", error.getvalue())
+        self.assertNotIn("Traceback", error.getvalue())
+
     def test_parallel_jobs_have_distinct_wall_and_runner_time(self):
         receipt = cli["summarize"](run(), [
             job(1, "01", "10"), job(2, "02", "08"), job(3, None, None, "skipped")
@@ -61,8 +88,10 @@ class ReceiptTests(unittest.TestCase):
                 return run(1)
             if path.endswith("/2"):
                 return run(2)
-            jobs = [job(1, "00", "10")] if "/runs/1/" in path else [
-                job(1, "00", "06"), job(2, "00", "06")]
+            jobs = [job(1, "00", "10", labels=("ubuntu-22.04",))] if "/runs/1/" in path else [
+                job(1, "00", "06", labels=("ubuntu-24.04",)),
+                job(2, "00", "06", labels=("ubuntu-24.04",)),
+            ]
             return [{"total_count": len(jobs), "jobs": jobs}]
 
         output = io.StringIO()
@@ -74,6 +103,8 @@ class ReceiptTests(unittest.TestCase):
         self.assertIn("−4m 00s (-40.0%)", report)
         self.assertIn("+2m 00s (+20.0%)", report)
         self.assertIn("job set", report)
+        self.assertIn("runner labels", report)
+        self.assertIn("matrix configuration", report)
 
     def test_audit_escapes_step_names_and_links_evidence(self):
         def api(path, paginate=False):
@@ -85,6 +116,14 @@ class ReceiptTests(unittest.TestCase):
             report = cli["audit"](REPO, 2, None)
         self.assertIn("Install &#124; compile | 10m 00s | 2", report)
         self.assertIn("/actions/runs/2/job/7", report)
+        self.assertIn("timed occurrences, not unique runs", report)
+
+    def test_safe_escapes_markdown_formatting_characters(self):
+        value = cli["safe"]("**bold** `code` _name_ ~strike~ \\")
+        self.assertEqual(
+            value,
+            r"\*\*bold\*\* \`code\` \_name\_ \~strike\~ \\",
+        )
 
 
 if __name__ == "__main__":
